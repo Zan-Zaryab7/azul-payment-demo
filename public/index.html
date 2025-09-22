@@ -1,0 +1,107 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>Azul Payment Demo</title>
+  <style>
+    body { font-family: Arial, sans-serif; background:#f6f8fb; padding:24px; }
+    .container { max-width:560px; margin:auto; background:white; padding:20px; border-radius:10px; box-shadow:0 2px 12px rgba(0,0,0,0.08);}
+    input, button { width:100%; padding:10px; margin:8px 0; border-radius:6px; border:1px solid #ccc; box-sizing:border-box;}
+    button { background:#1f6feb; color:white; border:none; cursor:pointer; padding:12px;}
+    pre { background:#eef; padding:12px; border-radius:6px; overflow:auto; max-height:300px;}
+    .hint { font-size:0.9rem; color:#555; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>Pay with Azul (Demo)</h2>
+    <p class="hint">Use test cards provided. Double-click the card field to autofill.</p>
+
+    <form id="paymentForm">
+      <input id="cardNumber" placeholder="Card Number" required />
+      <input id="expiry" placeholder="Expiration (YYYYMM)" required />
+      <input id="cvc" placeholder="CVC" required />
+      <input id="amount" placeholder="Amount (e.g. 10000 for 100.00 DOP)" required />
+      <input id="order" placeholder="Order Number" required />
+      <button type="submit">Pay Now</button>
+    </form>
+
+    <div id="responseBox"><pre id="raw"></pre></div>
+  </div>
+
+  <script>
+    function luhnIsValid(cc) {
+      cc = cc.replace(/\D/g, '');
+      let sum = 0, alt = false;
+      for (let i = cc.length - 1; i >= 0; i--) {
+        let n = parseInt(cc[i], 10);
+        if (alt) { n *= 2; if (n > 9) n -= 9; }
+        sum += n; alt = !alt;
+      }
+      return (sum % 10) === 0;
+    }
+
+    document.getElementById("paymentForm").addEventListener("submit", async function(e) {
+      e.preventDefault();
+
+      const CardNumber = document.getElementById("cardNumber").value.trim();
+      const Expiration = document.getElementById("expiry").value.trim();
+      const CVC = document.getElementById("cvc").value.trim();
+      const Amount = document.getElementById("amount").value.trim();
+      const OrderNumber = document.getElementById("order").value.trim();
+
+      if (!luhnIsValid(CardNumber)) {
+        if (!confirm("Card number failed Luhn check. Continue anyway?")) return;
+      }
+
+      try {
+        const resp = await fetch("/api/pay", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ CardNumber, Expiration, CVC, Amount, OrderNumber })
+        });
+
+        const data = await resp.json();
+        document.getElementById("raw").innerText = JSON.stringify(data, null, 2);
+
+        const azul = data.azul || data;
+        if (azul.ACSUrl && azul.PaReq) {
+          openAcsForm(azul.ACSUrl, {
+            PaReq: azul.PaReq,
+            MD: azul.MD || "",
+            TermUrl: window.location.origin + "/api/3ds/term"
+          });
+        }
+      } catch (err) {
+        document.getElementById("raw").innerText = "Client error: " + err.message;
+      }
+    });
+
+    function openAcsForm(actionUrl, fields) {
+      const win = window.open("", "acsWindow", "width=600,height=700");
+      const doc = win.document;
+      doc.open();
+      doc.write("<html><body><p>Redirecting to ACS...</p>");
+      doc.write("<form id='acsForm' method='POST' action='" + actionUrl + "'>");
+      for (const k in fields) {
+        doc.write("<input type='hidden' name='" + k + "' value='" + (fields[k]||"") + "'/>");
+      }
+      doc.write("<input type='submit' value='Continue'/>");
+      doc.write("</form><script>document.getElementById('acsForm').submit();<\/script></body></html>");
+      doc.close();
+    }
+
+    const testCards = [
+      "5424180279791732","6011000990099818","4260550061845872",
+      "4035874000424977","5426064000424979","4012000033330026",
+      "4761120010000492","4147463011110117","4005520000000129"
+    ];
+    document.getElementById("cardNumber").addEventListener("dblclick", () => {
+      const val = testCards[Math.floor(Math.random()*testCards.length)];
+      document.getElementById("cardNumber").value = val;
+      document.getElementById("expiry").value = "202512";
+      document.getElementById("cvc").value = "123";
+    });
+  </script>
+</body>
+</html>
